@@ -1,0 +1,229 @@
+---
+title: "Project UAS SML"
+author: "Devira Maharani (3338240015)"
+date: "2026-06-02"
+output:
+  word_document: default
+  html_document: default
+---
+
+:::justify
+
+## Deskripsi Dataset
+Dataset ini berisi data profil akademik dan latar belakang siswa (Student Performance). Data terdiri dari 395 observasi dan memuat 7 variabel utama yaitu age (usia siswa), Medu (pendidikan ibu), Fedu (pendidikan ayah), failures (jumlah kegagalan kelas di masa lalu), absences (jumlah hari ketidakhadiran), G3 (nilai ujian akhir siswa), dan Cluster (label kelompok hasil pemodelan clustering).
+
+## Package yang digunakan dan Import Data
+Pada tahap awal analisis, digunakan beberapa package di R untuk mendukung proses pengolahan data dan clustering.dilakukan Principal Component Analysis (PCA) menggunakan fungsi prcomp() untuk mereduksi dimensi data dan memudahkan visualisasi hasil clustering.
+
+```{r}
+library(readxl)       # Berfungsi untuk membaca data dari file Excel
+library(ggplot2)      # Berfungsi untuk membuat grafik dan visualisasi data 
+library(factoextra)   # Berfungsi untuk mempermudah visualisasi hasil analisis multivariat 
+library(dbscan)       # Berfungsi untuk menjalankan algoritma clustering berbasis kerapatan dan mencari nilai epsilon optimal 
+library(mclust)       # Berfungsi untuk memodelkan clustering berbasis distribusi parametrik 
+library(cluster)      # Berfungsi untuk menghitung metrik evaluasi jarak dan validasi internal klaster 
+library(fpc)          # Berfungsi untuk komputasi klaster fleksibel dan menyediakan statistik perbandingan karakteristik model
+
+# Import Data Excel
+data_tugas <- read_excel("~/Devira sem 4/SML/DATA TUGAS SML CLUTERING.xlsx")
+
+# Pilih variabel numerik dan standarisasi
+data_scaling <- scale(data_tugas[, c("age", "Medu", "Fedu", "failures", "absences", "G3")])
+
+# Hitung Proyeksi PCA
+pca_output <- prcomp(data_scaling, scale. = FALSE)
+df_pca <- as.data.frame(pca_output$x[, 1:2])
+colnames(df_pca) <- c("PC1", "PC2")
+
+#  Menghitung persentase kontribusi varians dari setiap Principal Component (PC)
+var_persen <- (pca_output$sdev^2) / sum(pca_output$sdev^2) * 100
+```
+
+## Visualisasi Geometri
+```{r}
+# Visualisasi Geometri Data Awal dengan Label persentase varians
+ggplot(df_pca, aes(x = PC1, y = PC2)) +
+  geom_point(col = "darkblue", alpha = 0.7, size = 2) +
+  theme_bw() +
+  labs(
+    title = "Plot Sebaran Geometri Data Awal (Proyeksi PCA 2D)",
+    # sprintf("%.2f", ...) memformat angka agar rapi menjadi 2 digit di belakang koma
+    x = paste0("Principal Component 1 / Dim 1 (", sprintf("%.2f", var_persen[1]), "%)"),
+    y = paste0("Principal Component 2 / Dim 2 (", sprintf("%.2f", var_persen[2]), "%)")
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 12)
+)
+```
+
+**Interpretasi**
+Hasil analisis komponen utama (Principal Component Analysis - PCA) dalam bentuk dua dimensi ($2\text{D}$) untuk melihat sebaran geometri dari data awal. Berdasarkan visualisasinya, sumbu horizontal atau komponen utama pertama (PC1) mampu menjelaskan 19.54% varians data, sedangkan sumbu vertikal atau komponen utama kedua (PC2) menjelaskan 18.15% varians data. Secara akumulatif, kedua dimensi ini hanya mampu merangkum sekitar 37.69% dari total informasi atau keragaman yang ada pada data asli.Dari pola sebarannya, titik-titik data terlihat menumpuk dengan sangat padat di area pusat, yaitu di sekitar koordinat (0,0). Pola memusat ini menunjukkan bahwa mayoritas objek data memiliki karakteristik atau nilai fitur yang relatif serupa dan homogen pada ruang reduksi ini. Selain itu, tidak terlihat adanya pemisahan kelompok (clustering) yang jelas atau kontras di antara titik-titik data tersebut. 
+
+## Distance-Based Clustering (DBSCAN)
+Pada tahap clustering, digunakan algoritma Density-Based Spatial Clustering of Applications with Noise (DBSCAN) untuk mengelompokkan data berdasarkan tingkat kepadatan (density) tanpa perlu menentukan jumlah klaster di awal.
+
+```{r}
+# DBSCAN
+set.seed(123)
+
+# Menentukan Nilai Epsilon Optimal (K-NN Distance Plot)
+kNNdistplot(data_scaling, k = 4)
+
+# Menjalankan DBSCAN
+res_dbscan <- dbscan::dbscan(data_scaling, eps = 1.4, minPts = 4)
+table(res_dbscan$cluster)
+```
+
+
+
+## Spectral Clustering
+Pada tahap Spectral Clustering untuk mengelompokkan data berdasarkan struktur kemiripan antar observasi. Proses diawali dengan menghitung matriks kemiripan (similarity matrix) menggunakan Gaussian Kernel, yang mengubah jarak antar data menjadi ukuran kemiripan.
+
+```{r}
+# SPECTRAL CLUSTERING
+set.seed(123)
+
+# Menghitung matriks kemiripan (Similarity Matrix) berbasis Gaussian Kernel
+matriks_kemiripan <- exp(-as.matrix(dist(data_scaling))^2)
+
+# Proses Dekomposisi Nilai Eigen
+hasil_eigen <- eigen(matriks_kemiripan)
+
+# Ekstraksi 4 eigenvector terbesar/terkecil (Menyesuaikan jumlah kluster target)
+jumlah_kluster <- 4
+vektor_eigen_terpilih <- hasil_eigen$vectors[, 1:jumlah_kluster]
+
+# Implementasi K-Means pada baris eigenvector yang sudah dipilih
+model_spectral <- kmeans(vektor_eigen_terpilih, centers = jumlah_kluster, nstart = 25)
+
+# Menampilkan tabel distribusi jumlah data per kluster
+table(model_spectral$cluster)
+
+# Memasukkan label klaster terbaik ke dataframe PCA
+df_pca$Cluster_Terpilih <- as.factor(model_spectral$cluster) # Menggunakan model_spectral milikmu
+```
+
+```{r}
+# Visualisasi plot klaster hasil Spectral Clustering
+ggplot(df_pca, aes(x = PC1, y = PC2, col = Cluster_Terpilih)) +
+  geom_point(alpha = 0.8, size = 2.5) +
+  # Kode warna langsung dimasukkan ke dalam fungsi di bawah ini:
+  scale_color_manual(values = c("darkblue", "hotpink", "black", "purple")) +
+  theme_minimal() +
+  labs(
+    title = "Hasil Akhir Analisis Clustering (Spectral Clustering)",
+    subtitle = "Visualisasi Klaster pada Ruang PCA Dua Dimensi",
+    x = "Principal Component 1 (PC1)",
+    y = "Principal Component 2 (PC2)",
+    col = "Klaster"
+  )
+```
+
+**Interpretasi**
+Visualisasi pada ruang komponen utama dua dimensi (PC1 dan PC2) menunjukkan bagaimana data multidimensi asli berhasil direduksi untuk memperlihatkan struktur pengelompokan yang dihasilkan oleh metode Spectral Clustering. Berdasarkan sebaran titik data, terbentuk empat klaster yang memiliki karakteristik kepadatan dan cakupan wilayah yang sangat berbeda di dalam ruang komponen utama ini. Klaster 1 tampak mengelompok cukup rapat di area bawah, didominasi oleh nilai PC2 negatif pada rentang 0 hingga -2. Sementara itu, Klaster 2 dan Klaster 3 menunjukkan tingkat homogenitas atau kemiripan objek yang sangat tinggi. Hal ini terlihat dari kerapatan titik-titiknya yang berpusat di area tengah, di mana Klaster 2 condong ke arah kanan (PC1 positif) dan Klaster 3 cenderung berada di area tengah agak kiri (PC1 negatif).
+
+## Model-Based Clustering (Gaussian Mixture Model / GMM)
+Pada tahap ini dilakukan Model-Based Clustering menggunakan metode Gaussian Mixture Model (GMM) melalui fungsi Mclust(). Metode ini mengasumsikan bahwa data berasal dari campuran beberapa distribusi Gaussian (normal), di mana setiap distribusi merepresentasikan satu klaster. Berbeda dengan metode clustering berbasis jarak, GMM mengelompokkan data berdasarkan probabilitas keanggotaan pada setiap klaster.
+
+```{r}
+# model based GMM
+# Membuat model GMM
+gmm_model <- Mclust(data_scaling)
+
+# Menampilkan ringkasan hasil model
+summary(gmm_model)
+```
+
+
+```{r}
+# Visualisasi
+cluster_assigment <- predict(gmm_model)$classification
+
+# Ubah data_scaling menjadi data frame agar bisa dibaca oleh ggplot
+data_plot <- as.data.frame(data_scaling)
+
+# Tambahkan kolom cluster ke dalam data frame tersebut
+data_plot$Cluster <- as.factor(cluster_assigment)
+
+#Gambar plot dengan variabel yang benar (x = absences, y = G3)
+ggplot(data = data_plot, aes(x = absences, y = G3)) + 
+  geom_point(aes(col = Cluster), alpha = 0.7, size = 2) + 
+  theme_bw() + 
+  labs(
+    title = "Visualisasi GMM Clustering",
+    x = "Absences (Standarisasi)",
+    y = "G3 / Nilai Akhir (Standarisasi)",
+    col = "Cluster"
+  )
+```
+
+**Interpretasi**
+hasil pengelompokan menggunakan metode Gaussian Mixture Model (GMM) Clustering berdasarkan dua variabel yang telah distandarisasi, yaitu jumlah ketidakhadiran (Absences) pada sumbu X dan nilai akhir siswa (G3 / Nilai Akhir) pada sumbu Y. Penggunaan data terstandardisasi ini terlihat dari skala kedua sumbu yang berpusat di sekitar angka nol dengan rentang nilai positif dan negatif yang mencerminkan deviasi standar dari nilai rata-rata aslinya. Dari hasil pemodelan GMM, data terbagi ke dalam 5 klaster yang diidentifikasi melalui gradasi warna yang berbeda, Pada area dengan ketidakhadiran rendah (Absences negatif), data sangat padat dan didominasi oleh Klaster 5 untuk nilai akhir menengah-tinggi. Sebaliknya, saat jumlah ketidakhadiran meningkat (Absences positif), data menjadi lebih renggang dan didominasi oleh Klaster 3 serta Klaster 4. Adanya titik-titik yang saling tumpang tindih (overlapping) menunjukkan fleksibilitas Gaussian Mixture Model (GMM) yang bekerja berdasarkan probabilitas distribusi,
+
+## Clustering Criteria
+Pada tahap ini dilakukan evaluasi kualitas klaster untuk membandingkan performa metode DBSCAN, Spectral Clustering, dan Gaussian Mixture Model (GMM) menggunakan Silhouette Coefficient.
+
+```{r}
+# Hitung matriks jarak antar objek dari data yang discaling
+dist_data <- dist(data_scaling)
+
+# Ambil penugasan klaster dari ketiga model
+fit_dbscan <- res_dbscan$cluster
+fit_spectral <- model_spectral$cluster
+fit_gmm <- cluster_assigment
+
+# Hitung rata-rata Silhouette Width untuk masing-masing model
+# (Catatan: Untuk DBSCAN, noise/cluster 0 diabaikan agar tidak merusak interpretasi)
+sil_dbscan <- mean(silhouette(fit_dbscan[fit_dbscan > 0], dist(data_scaling[fit_dbscan > 0, ]))[, 3])
+sil_spectral <- mean(silhouette(fit_spectral, dist_data)[, 3])
+sil_gmm <- mean(silhouette(fit_gmm, dist_data)[, 3])
+
+# Tampilkan hasil komparasi untuk menentukan model terbaik
+cat("Nilai mendekati 1 berarti struktur klaster semakin baik/terpisah.\n\n")
+cat(" -> Nilai Silhouette DBSCAN   :", round(sil_dbscan, 4), "\n")
+cat(" -> Nilai Silhouette Spectral :", round(sil_spectral, 4), "\n")
+cat(" -> Nilai Silhouette GMM      :", round(sil_gmm, 4), "\n")
+```
+
+```{r}
+# VISUALISASI HASIL Akhir
+# Ekstrak persentase varians dari objek PCA untuk sumbu X dan Y
+var_persen <- (pca_output$sdev^2 / sum(pca_output$sdev^2)) * 100
+df_pca$Cluster_Terpilih <- fit_dbscan
+
+# Mengubah angka klaster menjadi label teks akademis
+df_pca$Cluster_Terpilih <- factor(
+  df_pca$Cluster_Terpilih, 
+  levels = c(0, sort(unique(fit_dbscan[fit_dbscan > 0]))),
+  labels = c("Noise / Pencilan", paste("Klaster", sort(unique(fit_dbscan[fit_dbscan > 0]))))
+)
+
+# Menyiapkan palet warna kustom (Abu-abu untuk Noise, warna cerah untuk klaster resmi)
+jumlah_klaster_resmi <- length(unique(fit_dbscan[fit_dbscan > 0]))
+warna_palet <- c("gray60", scales::brewer_pal(palette = "Set1")(jumlah_klaster_resmi))
+
+# Gambar Plot Scatter PCA
+plot_pca <- ggplot(df_pca, aes(x = PC1, y = PC2, col = Cluster_Terpilih)) +
+  geom_point(alpha = 0.8, size = 2.5) +
+  scale_color_manual(values = warna_palet) +
+  theme_minimal() +
+  labs(
+    title = "Hasil Akhir Analisis Clustering (DBSCAN)",
+    subtitle = "Visualisasi Kepadatan Klaster pada Ruang PCA Dua Dimensi",
+    x = paste0("Principal Component 1 / Dim 1 (", sprintf("%.2f", var_persen[1]), "%)"),
+    y = paste0("Principal Component 2 / Dim 2 (", sprintf("%.2f", var_persen[2]), "%)"),
+    col = "Status / Kelompok"
+  ) +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 14)
+  )
+
+# Tampilkan Plot PCA
+print(plot_pca)
+```
+
+**Interpretasi Hasil Akhir**
+Berdasarkan visualisasi hasil clustering menggunakan metode DBSCAN pada ruang PCA dua dimensi, terlihat bahwa sebagian besar data berhasil dikelompokkan ke dalam Klaster 1 (warna merah). Hal ini menunjukkan bahwa mayoritas observasi memiliki tingkat kemiripan yang tinggi dan membentuk satu kelompok utama yang padat di sekitar pusat distribusi data.Selain itu, terdapat sejumlah titik berwarna abu-abu yang diklasifikasikan sebagai noise atau pencilan (outlier). Titik-titik ini tidak memiliki kepadatan tetangga yang cukup untuk dimasukkan ke dalam suatu klaster berdasarkan parameter DBSCAN yang digunakan. Keberadaan noise menunjukkan adanya observasi yang memiliki pola berbeda atau menyimpang dari kelompok data utama.Secara keseluruhan, hasil clustering mengindikasikan bahwa struktur data didominasi oleh satu kelompok besar dengan beberapa kelompok kecil serta sejumlah pencilan, sehingga pola kepadatan data cenderung terpusat pada Klaster 1 dan menyebar pada area tertentu.
+
+Berdasarkan evaluasi menggunakan Silhouette Coefficient, metode DBSCAN memperoleh nilai Silhouette tertinggi sebesar 0,6215 dibandingkan Spectral Clustering sebesar 0,5482 dan Gaussian Mixture Model (GMM) sebesar 0,4876. Nilai tersebut menunjukkan bahwa DBSCAN menghasilkan klaster yang lebih kompak dan memiliki pemisahan yang lebih baik antar klaster. Oleh karena itu, DBSCAN dipilih sebagai metode clustering terbaik untuk dataset ini dan digunakan sebagai model akhir dalam visualisasi hasil clustering.
